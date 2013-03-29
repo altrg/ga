@@ -1,0 +1,25 @@
+%% App config
+{ga,
+ [{app_key, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com"},
+  {app_secret, "xxxxxxxxxxxxxxxxxxxxxxxx"},
+  {token, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+  {amqp_host, "localhost"},
+  {amqp_user, "guest"},
+  {amqp_password, "guest"},
+  {amqp_virtual_host, "/"},
+  {amqp_queue, "ga"},
+  {amqp_prefetch, 0}]}.
+
+%% Logging
+{lager,
+ [{colored, false},
+  {handlers,
+   [{lager_file_backend,
+     [{file, "log/ga.log"}, {level, info}, {size, 10000000}, {date, "$D0"}, {count, 5}]},
+    {lager_console_backend,
+     %% Format console debug: 08:58:24.123 [debug] <0.56.0> mod:fun:47 "msg"
+     [debug, {lager_default_formatter, [time, " ", color, "[", severity, "] ", pid,
+                                        {module, [" ", module], ""},
+                                        {function, [":", function], ""},
+                                        {line, [":", line], ""}, " ",
+                                        message, "\n"]} ]} ]} ]}.

@@ -1,0 +1,12 @@
+{application, ga,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { ga_app, []}},
+  {env, []}
+ ]}.
