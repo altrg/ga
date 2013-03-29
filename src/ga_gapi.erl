@@ -4,19 +4,29 @@
 -include("ga.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/0, call/2, refresh_token/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--define(SERVER, ?MODULE). 
-
--record(state, {}).
+-record(state, {access_token,
+                %% config values
+                key, secret, token, refresh_url, ga_url, timeout, retry
+               }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+-spec call(amqp_client(), json()) -> {ok, json()} | {error, term()}.
+%% @doc Send request to GA and return reply or error
+call(From, Msg) ->
+    gen_server:call(?MODULE, {call, From, Msg}).
+
+-spec refresh_token() -> ok | {error, term()}.
+%% @doc Refresh oauth temporary token
+refresh_token() ->
+    gen_server:call(?MODULE, refresh_token).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -26,7 +36,7 @@
 %% @end
 %%--------------------------------------------------------------------
 start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -44,8 +54,13 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    ?D("Main module init"),
-    {ok, #state{}}.
+    {ok, #state{key=?CFG(app_key),
+                secret=?CFG(app_secret),
+                token=?CFG(token),
+                refresh_url=?CFG(refresh_url),
+                ga_url=?CFG(ga_url),
+                timeout=?CFG(http_timeout),
+                retry=?CFG(http_retry)}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -61,9 +76,22 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(refresh_token, _From, State) ->
+    URL = State#state.refresh_url,
+    Headers = [],
+    CType = "application/x-www-form-urlencoded",
+    Body = list_to_binary(["client_id=", State#state.key,
+                           "&client_secret=", State#state.secret,
+                           "&refresh_token=", State#state.token,
+                           "&grant_type=refresh_token"]),
+    case http(post, {URL, Headers, CType, Body}, State) of
+        {ok, JSON} ->
+            {Resp} = jiffy:decode(JSON),
+            Token = proplists:get_value(<<"access_token">>, Resp),
+            lager:debug("New access token retreived"),
+            {reply, ok, State#state{access_token=Token}};
+        {error, Err} -> {reply, {error, Err}, State}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -119,3 +147,14 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+%% @doc Simple http request wrapper. Only 200 code accepted. Retry on client error
+http(Method, Request, State) -> http(Method, Request, State, State#state.retry).
+http(Method, Request, State, Attempt) -> 
+    case httpc:request(Method, Request, [{timeout, State#state.timeout}], [{full_result, false}]) of
+        {ok, {200, Body}} -> {ok, Body};
+        {ok, Err} -> {error, Err};
+        {error, Err} when Attempt > 1 ->
+            lager:warning("Retrying because: ~p", [Err]),
+            http(Method, Request, State, Attempt-1);
+        {error, Err} -> {error, Err} % no more attempts
+    end.

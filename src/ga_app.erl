@@ -7,7 +7,10 @@
 %% Application callbacks
 -export([start/2, stop/1]).
 
--define(APPS, [lager]).
+%% @TODO remove
+-compile([export_all]).
+
+-define(APPS, [lager, inets, ssl]).
 
 %% ===================================================================
 %% API

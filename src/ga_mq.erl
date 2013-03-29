@@ -16,7 +16,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec send(binary(), binary()) -> ok.
+-spec send(amqp_client(), json()) -> ok.
 %% @doc Send message to AMQP
 send(To, Msg) ->
     gen_server:cast(?MODULE, {send, To, Msg}).

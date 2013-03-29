@@ -8,3 +8,6 @@
 
 -define(CFG(K), ga_app:get_config(K, [unconfigured, K])).
 -define(CFGB(K), list_to_binary(?CFG(K))).
+
+-type amqp_client() :: binary() | undefined.
+-type json() :: binary().
