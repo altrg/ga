@@ -11,7 +11,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {chan, queue}).
+-record(state, {chan, queue, outqueue}).
 
 %%%===================================================================
 %%% API
@@ -59,7 +59,7 @@ init([]) ->
     Consume = #'basic.consume'{queue=Queue},
     #'basic.consume_ok'{} = amqp_channel:call(Chan, Consume),
     lager:info("AMQP connected"),
-    {ok, #state{chan=Chan, queue=Queue}}.
+    {ok, #state{chan=Chan, queue=Queue, outqueue=?CFGB(amqp_outqueue)}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -90,8 +90,11 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast({send, To, Msg}, State) ->
-    lager:debug("Send message to ~s: ~s", [To, Msg]),
-    amqp_channel:cast(State#state.chan, #'basic.publish'{routing_key=To}, #amqp_msg{payload=Msg}),
+    Queue = if To =:= undefined -> State#state.outqueue;
+               true -> To
+            end,
+    lager:debug("Send message to ~s: ~s", [Queue, Msg]),
+    amqp_channel:cast(State#state.chan, #'basic.publish'{routing_key=Queue}, #amqp_msg{payload=Msg}),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
