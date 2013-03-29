@@ -2,31 +2,32 @@
 -behaviour(gen_server).
 
 -include("ga.hrl").
+-include_lib("eunit/include/eunit.hrl").
 
 %% API
--export([start_link/0, call/2, refresh_token/0]).
+-export([start_link/0, refresh_token/0, request/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {access_token,
+-record(state, {access_token= <<>>,
                 %% config values
-                key, secret, token, refresh_url, ga_url, timeout, retry
+                key, secret, token, refresh_url, request_url, timeout, retry
                }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec call(amqp_client(), json()) -> {ok, json()} | {error, term()}.
-%% @doc Send request to GA and return reply or error
-call(From, Msg) ->
-    gen_server:call(?MODULE, {call, From, Msg}).
-
 -spec refresh_token() -> ok | {error, term()}.
 %% @doc Refresh oauth temporary token
 refresh_token() ->
     gen_server:call(?MODULE, refresh_token).
+
+-spec request(ga_params()) -> {ok, json()} | {error, term()}.
+%% @doc Make request to GA
+request(Params) ->
+    gen_server:call(?MODULE, {request, Params}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -58,7 +59,7 @@ init([]) ->
                 secret=?CFG(app_secret),
                 token=?CFG(token),
                 refresh_url=?CFG(refresh_url),
-                ga_url=?CFG(ga_url),
+                request_url=?CFG(request_url),
                 timeout=?CFG(http_timeout),
                 retry=?CFG(http_retry)}}.
 
@@ -88,10 +89,18 @@ handle_call(refresh_token, _From, State) ->
         {ok, JSON} ->
             {Resp} = jiffy:decode(JSON),
             Token = proplists:get_value(<<"access_token">>, Resp),
-            lager:debug("New access token retreived"),
+            lager:debug("New access token retrieved"),
             {reply, ok, State#state{access_token=Token}};
         {error, Err} -> {reply, {error, Err}, State}
-    end.
+    end;
+
+handle_call({request, Params}, _From, State) ->
+    URL = State#state.request_url++binary_to_list(make_query(Params)),
+    %% @TODO what about "Bearer"
+    %% https://developers.google.com/analytics/devguides/reporting/core/v3/reference#data_request
+    Headers = [{"Authorization", "OAuth "++binary_to_list(State#state.access_token)}],
+    Reply = http(get, {URL, Headers}, State),
+    {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -158,3 +167,33 @@ http(Method, Request, State, Attempt) ->
             http(Method, Request, State, Attempt-1);
         {error, Err} -> {error, Err} % no more attempts
     end.
+
+%% @doc Make urlencoded binary query from GA params
+make_query([]) -> <<>>;
+make_query(Params) -> make_query(Params, []).
+make_query([], Acc) -> join(Acc, "&");
+make_query([{Par, Val} | T], Acc) -> make_query(T, [[Par, "=", encode(Val)] | Acc]).
+
+%% @doc encode GA value
+encode(Val) when is_list(Val) -> encode(join(Val, ","));
+encode(Val) -> list_to_binary(http_uri:encode(binary_to_list(Val))).
+
+%% @doc Join list elements with divider
+join([H|T], Div) -> list_to_binary([H| [[Div, E] || E <- T]]).
+
+%%%===================================================================
+%%% Unit tests
+%%%===================================================================
+make_query_test_() ->
+    [?_assertEqual(make_query([]), <<>>),
+     ?_assertEqual(make_query([{<<"ids">>, [<<"ga:52415084">>]}]), <<"ids=ga%3A52415084">>),
+     ?_assertEqual(make_query([{<<"start-date">>, <<"2013-03-23">>},
+                               {<<"end-date">>, <<"2013-03-28">>},
+                               {<<"metrics">>, [<<"ga:goal6Completions">>, <<"ga:goal1Completions">>]},
+                               {<<"dimensions">>, [<<"ga:landingPagePath">>, <<"ga:date">>]},
+                               {<<"ids">>, [<<"ga:52415084">>]}]),
+                   <<"ids=ga%3A52415084&",
+                     "dimensions=ga%3AlandingPagePath%2Cga%3Adate&",
+                     "metrics=ga%3Agoal6Completions%2Cga%3Agoal1Completions&",
+                     "end-date=2013-03-28&",
+                     "start-date=2013-03-23">>)].

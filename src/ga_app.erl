@@ -7,9 +7,6 @@
 %% Application callbacks
 -export([start/2, stop/1]).
 
-%% @TODO remove
--compile([export_all]).
-
 -define(APPS, [lager, inets, ssl]).
 
 %% ===================================================================

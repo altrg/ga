@@ -11,3 +11,4 @@
 
 -type amqp_client() :: binary() | undefined.
 -type json() :: binary().
+-type ga_params() :: proplists:proplist().

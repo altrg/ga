@@ -4,7 +4,7 @@
   {app_secret, "xxxxxxxxxxxxxxxxxxxxxxxx"},
   {token, "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
   {refresh_url, "https://accounts.google.com/o/oauth2/token"},
-  {ga_url, "https://www.googleapis.com/analytics/v3/data/ga"},
+  {request_url, "https://www.googleapis.com/analytics/v3/data/ga/?"},
   {http_timeout, 5000}, %ms
   {http_retry, 2},
   {amqp_host, "localhost"},
