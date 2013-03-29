@@ -7,8 +7,7 @@
   {amqp_user, "guest"},
   {amqp_password, "guest"},
   {amqp_virtual_host, "/"},
-  {amqp_queue, "ga"},
-  {amqp_prefetch, 0}]}.
+  {amqp_queue, "ga"} ]}.
 
 %% Logging
 {lager,

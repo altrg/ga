@@ -6,4 +6,5 @@
 -define(D(Fmt, Args), io:format(user, "~s:~w "++Fmt++"\n", [?FILE, ?LINE | Args])).
 -endif.
 
--define(CFG(K), ga_app:get_config(K, undefined)).
+-define(CFG(K), ga_app:get_config(K, [unconfigured, K])).
+-define(CFGB(K), list_to_binary(?CFG(K))).

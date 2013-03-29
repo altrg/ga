@@ -2,19 +2,24 @@
 -behaviour(gen_server).
 
 -include("ga.hrl").
+-include_lib("amqp_client/include/amqp_client.hrl").
 
 %% API
--export([start_link/0]).
+-export([start_link/0, send/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {}).
+-record(state, {chan, queue}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+-spec send(binary(), binary()) -> ok.
+%% @doc Send message to AMQP
+send(To, Msg) ->
+    gen_server:cast(?MODULE, {send, To, Msg}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -42,7 +47,19 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, #state{}}.
+    Params = #amqp_params_network{username=?CFGB(amqp_user),
+                                 password=?CFGB(amqp_pass),
+                                 host=?CFG(amqp_host),
+                                 virtual_host=?CFGB(amqp_virtual_host)},
+    {ok, Conn} = amqp_connection:start(Params),
+    {ok, Chan} = amqp_connection:open_channel(Conn),
+    Queue = ?CFGB(amqp_queue),
+    Declare = #'queue.declare'{queue=Queue},
+    #'queue.declare_ok'{} = amqp_channel:call(Chan, Declare),
+    Consume = #'basic.consume'{queue=Queue},
+    #'basic.consume_ok'{} = amqp_channel:call(Chan, Consume),
+    lager:info("AMQP connected"),
+    {ok, #state{chan=Chan, queue=Queue}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -72,7 +89,9 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast(_Msg, State) ->
+handle_cast({send, To, Msg}, State) ->
+    lager:debug("Send message to ~s: ~s", [To, Msg]),
+    amqp_channel:cast(State#state.chan, #'basic.publish'{routing_key=To}, #amqp_msg{payload=Msg}),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -85,7 +104,14 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(_Info, State) ->
+handle_info(#'basic.consume_ok'{}, State) ->
+    {noreply, State};
+
+handle_info({#'basic.deliver'{delivery_tag=Tag}, #amqp_msg{props=Props, payload=Msg}}, State) ->
+    From = Props#'P_basic'.reply_to,
+    amqp_channel:call(State#state.chan, #'basic.ack'{delivery_tag=Tag}),
+    lager:debug("Received message from ~s: ~s", [From, Msg]),
+    %% @TODO dispatch
     {noreply, State}.
 
 %%--------------------------------------------------------------------
