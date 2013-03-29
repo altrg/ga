@@ -55,6 +55,8 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 init([]) ->
+    inets:start(),
+    ssl:start(),
     {ok, #state{key=?CFG(app_key),
                 secret=?CFG(app_secret),
                 token=?CFG(token),
