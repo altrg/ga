@@ -10,7 +10,11 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {client, json}).
+-define(INVALID_MESSAGE, <<"Unknown message format">>).
+-define(ERROR_QUERY, <<"Error sending query to GA">>).
+-define(UNKNOWN_RESPONSE, "Unhandled response received: ~p").
+
+-record(state, {client, json, params}).
 
 %%%===================================================================
 %%% API
@@ -36,7 +40,7 @@ start_link(Client, JSON) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Client, JSON]) ->
-    self() ! process,
+    self() ! parse,
     {ok, #state{client=Client, json=JSON}}.
 
 %%--------------------------------------------------------------------
@@ -80,9 +84,36 @@ handle_cast(_Msg, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(process, State) ->
-    %% @TODO jiffy decode, gapi query, error handling, amqp reply
-    {stop, normal, State}.
+handle_info(parse, #state{json=JSON}=State) ->
+    try
+        {Params} = jiffy:decode(JSON),
+        self() ! query_gapi,
+        {noreply, State#state{params=Params}}
+    catch throw:{error, Err} ->
+            lager:error("Invalid message: ~p~n~s", [Err, JSON]),
+            ga_mq:send(State#state.client, ?INVALID_MESSAGE),
+            {stop, normal, State}
+    end;
+
+handle_info(query_gapi, #state{params=Params}=State) ->
+    case gapi_request(Params) of
+        {error, Err} ->
+            lager:error("Can't query GA: ~p", [Err]),
+            ga_mq:send(State#state.client, ?ERROR_QUERY),
+            {stop, normal, State};
+        {200, Reply} ->
+            ga_mq:send(State#state.client, Reply),
+            {stop, normal, State};
+        {401, _} ->
+            lager:warning("Token must be refreshed"),
+            ok = ga_gapi:refresh_token(), % @TODO multiple refreshes race
+            self() ! query_gapi,
+            {noreply, State};
+        Resp ->
+            Reply = list_to_binary(io_lib:format(?UNKNOWN_RESPONSE, [Resp])),
+            ga_mq:send(State#state.client, Reply),
+            {stop, normal, State}
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -112,3 +143,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+%% @doc Ask GAPI, Retry on http client error
+gapi_request(Params) -> gapi_request(Params, ?CFG(http_retry)).
+gapi_request(Params, Attempt) ->
+    case ga_gapi:request(Params) of
+        {error, Err} when Attempt > 1 ->
+            lager:warning("Retrying because: ~p", [Err]),
+            gapi_request(Params, Attempt-1);
+        {error, Err} -> {error, Err}; % no more attempts
+        Reply -> Reply
+    end.

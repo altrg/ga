@@ -26,7 +26,7 @@
 refresh_token() ->
     gen_server:call(?MODULE, refresh_token).
 
--spec request(ga_params()) -> {ok, json()} | {error, term()}.
+-spec request(ga_params()) -> term() | {error, term()}.
 %% @doc Make request to GA
 request(Params) ->
     gen_server:call(?MODULE, {request, Params}).
