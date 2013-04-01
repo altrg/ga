@@ -18,18 +18,20 @@
                 key, secret, token, refresh_url, request_url, timeout, retry, qps
                }).
 
+-define(TIMEOUT, 60000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
 -spec refresh_token() -> ok | {error, term()}.
 %% @doc Refresh oauth temporary token
 refresh_token() ->
-    gen_server:call(?MODULE, refresh_token).
+    gen_server:call(?MODULE, refresh_token, ?TIMEOUT).
 
 -spec request(ga_params()) -> term() | {error, term()}.
 %% @doc Make request to GA
 request(Params) ->
-    gen_server:call(?MODULE, {request, Params}).
+    gen_server:call(?MODULE, {request, Params}, ?TIMEOUT).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -105,13 +107,14 @@ handle_call({request, Params}, From, #state{requests=Reqs, shaper=Shaper}=State)
     %% queries per second shaper
     if length(Shaper) < State#state.qps -> Shaper1 = [Now | Shaper];
        true ->
-            {Shaper1, [Oldest]} = lists:split(State#state.qps, [Now | Shaper]),
-            Diff = Now - Oldest,
-            if Diff < 1000, Diff > 0 ->
-                    lager:warning("Delay request for ~b ms", [Diff]),
-                    timer:sleep(Diff);
-               true -> ok
-            end
+            Diff = Now - lists:last(Shaper) - 1000,
+            Now1 = if Diff < 0 ->
+                           lager:warning("Delay request for ~b ms", [abs(Diff)]),
+                           timer:sleep(abs(Diff)),
+                           timestamp();
+                      true -> Now
+                   end,
+            {Shaper1, _} = lists:split(State#state.qps, [Now1 | Shaper])
     end,
     {ok, Req} = httpc:request(get, {URL, Headers}, [{timeout, State#state.timeout}], [{sync, false}]),
     Reqs1 = dict:store(Req, From, Reqs),
