@@ -1,35 +1,24 @@
--module(ga_mq).
+-module(ga_query).
 -behaviour(gen_server).
 
 -include("ga.hrl").
--include_lib("amqp_client/include/amqp_client.hrl").
 
 %% API
--export([start_link/0, send/2]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
--record(state, {chan, queue, outqueue}).
+-record(state, {client, json}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
--spec send(amqp_client(), json()) -> ok.
-%% @doc Send message to AMQP
-send(To, Msg) ->
-    gen_server:cast(?MODULE, {send, To, Msg}).
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+-spec start_link(amqp_client(), json()) -> {ok, pid()} | ignore | {error, term()}.
+%% @doc Start worker for handling query
+start_link(Client, JSON) ->
+    gen_server:start_link(?MODULE, [Client, JSON], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -46,20 +35,9 @@ start_link() ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
-init([]) ->
-    Params = #amqp_params_network{username=?CFGB(amqp_user),
-                                 password=?CFGB(amqp_pass),
-                                 host=?CFG(amqp_host),
-                                 virtual_host=?CFGB(amqp_virtual_host)},
-    {ok, Conn} = amqp_connection:start(Params),
-    {ok, Chan} = amqp_connection:open_channel(Conn),
-    Queue = ?CFGB(amqp_queue),
-    Declare = #'queue.declare'{queue=Queue},
-    #'queue.declare_ok'{} = amqp_channel:call(Chan, Declare),
-    Consume = #'basic.consume'{queue=Queue},
-    #'basic.consume_ok'{} = amqp_channel:call(Chan, Consume),
-    lager:info("AMQP connected"),
-    {ok, #state{chan=Chan, queue=Queue, outqueue=?CFGB(amqp_outqueue)}}.
+init([Client, JSON]) ->
+    self() ! process,
+    {ok, #state{client=Client, json=JSON}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -89,12 +67,7 @@ handle_call(_Request, _From, State) ->
 %%                                  {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_cast({send, To, Msg}, State) ->
-    Queue = if To =:= undefined -> State#state.outqueue;
-               true -> To
-            end,
-    lager:debug("Send message to ~s: ~s", [Queue, Msg]),
-    amqp_channel:cast(State#state.chan, #'basic.publish'{routing_key=Queue}, #amqp_msg{payload=Msg}),
+handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -107,15 +80,9 @@ handle_cast({send, To, Msg}, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
-handle_info(#'basic.consume_ok'{}, State) ->
-    {noreply, State};
-
-handle_info({#'basic.deliver'{delivery_tag=Tag}, #amqp_msg{props=Props, payload=Msg}}, State) ->
-    From = Props#'P_basic'.reply_to,
-    amqp_channel:call(State#state.chan, #'basic.ack'{delivery_tag=Tag}),
-    lager:debug("Received message from ~s: ~s", [From, Msg]),
-    ga_sup:start_query(From, Msg),
-    {noreply, State}.
+handle_info(process, State) ->
+    %% @TODO jiffy decode, gapi query, error handling, amqp reply
+    {stop, normal, State}.
 
 %%--------------------------------------------------------------------
 %% @private
