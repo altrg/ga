@@ -105,17 +105,17 @@ handle_call({request, Params}, From, #state{requests=Reqs, shaper=Shaper}=State)
     Headers = [{"Authorization", "OAuth "++binary_to_list(State#state.access_token)}],
     Now = timestamp(),
     %% queries per second shaper
-    if length(Shaper) < State#state.qps -> Shaper1 = [Now | Shaper];
-       true ->
-            Diff = Now - lists:last(Shaper) - 1000,
-            Now1 = if Diff < 0 ->
-                           lager:warning("Delay request for ~b ms", [abs(Diff)]),
-                           timer:sleep(abs(Diff)),
-                           timestamp();
-                      true -> Now
-                   end,
-            {Shaper1, _} = lists:split(State#state.qps, [Now1 | Shaper])
-    end,
+    Shaper1 = if length(Shaper) < State#state.qps -> [Now | Shaper];
+                 true ->
+                      Diff = Now - lists:last(Shaper) - 1000,
+                      Now1 = if Diff < 0 ->
+                                     lager:warning("Delay request for ~b ms", [abs(Diff)]),
+                                     timer:sleep(abs(Diff)),
+                                     timestamp();
+                                true -> Now
+                             end,
+                      lists:sublist([Now1 | Shaper], State#state.qps)
+              end,
     {ok, Req} = httpc:request(get, {URL, Headers}, [{timeout, State#state.timeout}], [{sync, false}]),
     Reqs1 = dict:store(Req, From, Reqs),
     {noreply, State#state{requests=Reqs1, shaper=Shaper1}}.
