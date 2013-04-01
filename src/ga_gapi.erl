@@ -113,8 +113,7 @@ handle_call({request, Params}, From, #state{requests=Reqs, shaper=Shaper}=State)
                true -> ok
             end
     end,
-    {ok, Req} = httpc:request(get, {URL, Headers}, [{timeout, State#state.timeout}],
-                              [{sync, false}, {full_result, false}]),
+    {ok, Req} = httpc:request(get, {URL, Headers}, [{timeout, State#state.timeout}], [{sync, false}]),
     Reqs1 = dict:store(Req, From, Reqs),
     {noreply, State#state{requests=Reqs1, shaper=Shaper1}}.
 
@@ -142,7 +141,11 @@ handle_cast(_Msg, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_info({http, {Id, Res}}, #state{requests=Reqs}=State) ->
-    gen_server:reply(dict:fetch(Id, Reqs), Res),
+    Reply = case Res of
+                {error, Err} -> {error, Err};
+                {{_, Code, _}, _Headers, Body} -> {Code, Body}
+            end,
+    gen_server:reply(dict:fetch(Id, Reqs), Reply),
     Reqs1 = dict:erase(Id, Reqs),
     {noreply, State#state{requests=Reqs1}}.
 

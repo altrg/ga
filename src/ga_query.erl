@@ -12,9 +12,9 @@
 
 -define(INVALID_MESSAGE, <<"Unknown message format">>).
 -define(ERROR_QUERY, <<"Error sending query to GA">>).
--define(UNKNOWN_RESPONSE, "Unhandled response received: ~p").
+-define(UNKNOWN_RESPONSE, <<"Unhandled response received: ">>).
 
--record(state, {client, json, params}).
+-record(state, {client, json, params, token_refreshed=false}).
 
 %%%===================================================================
 %%% API
@@ -101,16 +101,16 @@ handle_info(query_gapi, #state{params=Params}=State) ->
             lager:error("Can't query GA: ~p", [Err]),
             ga_mq:send(State#state.client, ?ERROR_QUERY),
             {stop, normal, State};
-        {200, Reply} ->
-            ga_mq:send(State#state.client, Reply),
+        {200, Body} ->
+            ga_mq:send(State#state.client, Body),
             {stop, normal, State};
-        {401, _} ->
+        {401, _} when not State#state.token_refreshed ->
             lager:warning("Token must be refreshed"),
-            ok = ga_gapi:refresh_token(), % @TODO multiple refreshes race
+            ok = ga_gapi:refresh_token(),
             self() ! query_gapi,
-            {noreply, State};
-        Resp ->
-            Reply = list_to_binary(io_lib:format(?UNKNOWN_RESPONSE, [Resp])),
+            {noreply, State#state{token_refreshed=true}};
+        {_, Body} ->
+            Reply = list_to_binary([?UNKNOWN_RESPONSE, Body]),
             ga_mq:send(State#state.client, Reply),
             {stop, normal, State}
     end.
