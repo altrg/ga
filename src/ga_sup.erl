@@ -25,15 +25,15 @@ start_query(Client, JSON) ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, [%% AMQP driver
-                                  {ga_mq, {ga_mq, start_link, []},
-                                   permanent, 5000, worker, [ga_mq]},
+    {ok, { {one_for_one, 5, 10}, [%% Query pool
+                                  {query_sup, {?MODULE, start_link, [query_sup]},
+                                   permanent, 5000, supervisor, [?MODULE]},
                                   %% GAPI interface
                                   {ga_gapi, {ga_gapi, start_link, []},
                                    permanent, 5000, worker, [ga_gapi]},
-                                  %% Query pool
-                                  {query_sup, {?MODULE, start_link, [query_sup]},
-                                   permanent, 5000, supervisor, [?MODULE]} ]}};
+                                  %% AMQP driver
+                                  {ga_mq, {ga_mq, start_link, []},
+                                   permanent, 5000, worker, [ga_mq]} ]}};
 
 init([query_sup]) ->
     {ok, { {simple_one_for_one, 0, 1}, [{ga_query, {ga_query, start_link, []},
