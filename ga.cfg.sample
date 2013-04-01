@@ -7,6 +7,7 @@
   {request_url, "https://www.googleapis.com/analytics/v3/data/ga/?"},
   {http_timeout, 5000}, %ms
   {http_retry, 2},
+  {qps, 10}, queries per second google limit
   {amqp_host, "localhost"},
   {amqp_user, "guest"},
   {amqp_password, "guest"},
